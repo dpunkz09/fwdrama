@@ -285,8 +285,9 @@ export default function DramaWatch({
             videoUrl = `${dramaApiUrl}${videoUrl}`;
         }
         
-        // For relay delivery, use our proxy to add cookies
-        if (streamData.delivery === 'relay') {
+        // For any dramadunyam URL (relay or direct), use our proxy to add cookies
+        const dramaApiUrl = (window as any).dramaApiUrl || 'https://dramadunyam.com';
+        if (videoUrl.includes(dramaApiUrl) || videoUrl.includes('dramadunyam.com')) {
             videoUrl = `/api/proxy/hls?url=${encodeURIComponent(videoUrl)}`;
         }
 
