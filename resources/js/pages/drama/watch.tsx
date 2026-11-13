@@ -275,14 +275,19 @@ export default function DramaWatch({
         setIsLoading(true);
         setRetryMessage('');
 
-        // Ensure URL is absolute
+        // Resolve URL to absolute if needed
         let videoUrl = streamData.url;
         
-        // For relay delivery or relative URLs, use our proxy to add cookies and resolve URL
-        if (streamData.delivery === 'relay' || videoUrl.startsWith('/')) {
-            // Only encode the original URL once
-            const urlToProxy = videoUrl.startsWith('/') ? videoUrl : streamData.url;
-            videoUrl = `/api/proxy/hls?url=${encodeURIComponent(urlToProxy)}`;
+        // For relative URLs, convert to absolute
+        if (videoUrl.startsWith('/')) {
+            // Get the drama API URL from window (set by Laravel)
+            const dramaApiUrl = (window as any).dramaApiUrl || 'https://dramadunyam.com';
+            videoUrl = `${dramaApiUrl}${videoUrl}`;
+        }
+        
+        // For relay delivery, use our proxy to add cookies
+        if (streamData.delivery === 'relay') {
+            videoUrl = `/api/proxy/hls?url=${encodeURIComponent(videoUrl)}`;
         }
 
         // Store event handlers for cleanup

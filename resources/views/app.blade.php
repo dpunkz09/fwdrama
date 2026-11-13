@@ -4,6 +4,11 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
+        {{-- Inline script to set drama API URL for frontend --}}
+        <script>
+            window.dramaApiUrl = '{{ config('services.dramadunyam.url') }}';
+        </script>
+
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>
             (function() {
