@@ -585,6 +585,9 @@ class DramaController extends Controller
                         $fullUrl = $baseUrl.'/'.$url;
                     }
 
+                    // Log for debugging
+                    \Log::debug('HLS URL rewrite', ['original' => $url, 'full' => $fullUrl]);
+
                     // Return URL that points to our proxy
                     return '/api/proxy/hls?url='.urlencode($fullUrl);
                 }, $body);
