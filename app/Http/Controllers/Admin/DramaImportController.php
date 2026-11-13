@@ -163,7 +163,7 @@ class DramaImportController extends Controller
                     ->withHeaders([
                         'Cookie' => $cookie,
                         'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    ])->get(self::BASE_URL."/series/{$slug}", [
+                    ])->get($this->getBaseUrl()."/series/{$slug}", [
                         'core' => 1,
                         'lang' => 'en',
                     ]);
