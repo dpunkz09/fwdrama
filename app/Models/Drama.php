@@ -96,10 +96,10 @@ class Drama extends Model
             'genre' => $data['genre'] ?? null,
             'views' => $data['views'] ?? 0,
             'is_featured' => $data['is_featured'] ?? false,
-            'release_date' => $data['release_date'] ?? null,
+            'release_date' => is_string($data['release_date'] ?? null) ? $data['release_date'] : null,
             'source_total' => $data['source_total'] ?? 0,
             'episodes_in_db' => $data['episodes_in_db'] ?? 0,
-            'bolum_no' => $data['bolum_no'] ?? null,
+            'bolum_no' => is_string($data['bolum_no'] ?? null) ? $data['bolum_no'] : null,
         ];
 
         // Handle JSON fields manually to avoid casting issues
