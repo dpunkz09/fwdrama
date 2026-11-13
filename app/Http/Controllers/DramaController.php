@@ -565,12 +565,17 @@ class DramaController extends Controller
                 str_contains($contentType, 'application/x-mpegURL') ||
                 str_ends_with($targetUrl, '.m3u8')) {
 
-                // Parse the base URL from the target
-                $baseUrl = dirname($targetUrl);
+                // Parse the base URL from the target (remove filename)
+                $parsedUrl = parse_url($targetUrl);
+                $baseUrl = $parsedUrl['scheme'].'://'.$parsedUrl['host'];
+
+                // Get the directory path (everything before the last slash)
+                $path = dirname($parsedUrl['path']);
+                $baseUrl .= $path;
 
                 // Rewrite relative URLs in the playlist to go through our proxy
                 $body = preg_replace_callback('/^([^#\s].+)$/m', function ($matches) use ($baseUrl) {
-                    $url = $matches[1];
+                    $url = trim($matches[1]);
 
                     // Skip if already absolute URL
                     if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
@@ -581,7 +586,7 @@ class DramaController extends Controller
                     }
 
                     // Return URL that points to our proxy
-                    return route('drama.proxy-hls').'?url='.urlencode($fullUrl);
+                    return '/api/proxy/hls?url='.urlencode($fullUrl);
                 }, $body);
             }
 
