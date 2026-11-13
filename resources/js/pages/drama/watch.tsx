@@ -278,7 +278,8 @@ export default function DramaWatch({
         // Ensure URL is absolute
         let videoUrl = streamData.url;
         if (videoUrl.startsWith('/')) {
-            videoUrl = `https://dramadunyam.com${videoUrl}`;
+            // Use Laravel route to get the full URL from config
+            videoUrl = `/api/proxy/hls?url=${encodeURIComponent(videoUrl)}`;
         }
 
         // For relay delivery, use our proxy to add cookies

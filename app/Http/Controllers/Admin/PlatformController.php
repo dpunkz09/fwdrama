@@ -42,9 +42,9 @@ class PlatformController extends Controller
                     'Cookie' => $cookie,
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept' => 'application/json',
-                    'Referer' => 'https://dramadunyam.com/',
+                    'Referer' => config('services.dramadunyam.url').'/',
                 ])
-                ->get('https://dramadunyam.com/api/platforms', [
+                ->get(config('services.dramadunyam.api_base_url').'/platforms', [
                     'lang' => 'en',
                 ]);
 
@@ -125,7 +125,7 @@ class PlatformController extends Controller
 
         // Handle relative URLs
         if (str_starts_with($url, '/')) {
-            $url = 'https://dramadunyam.com'.$url;
+            $url = config('services.dramadunyam.url').$url;
         }
 
         // If it's already a local storage URL, return as is
@@ -148,7 +148,7 @@ class PlatformController extends Controller
             $response = Http::timeout(30)
                 ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Referer' => 'https://dramadunyam.com/',
+                    'Referer' => config('services.dramadunyam.url').'/',
                 ])
                 ->get($url);
 

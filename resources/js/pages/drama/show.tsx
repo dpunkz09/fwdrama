@@ -110,7 +110,7 @@ export default function DramaShow({ drama, error, saved_count = 0, like_count = 
     const coverUrl =
         drama.cover.startsWith('http') || drama.cover.startsWith('/storage')
             ? drama.cover
-            : `https://dramadunyam.com${drama.cover}`;
+            : `/storage/covers/${drama.slug}.webp`; // Use local storage path
 
     const available = drama.available_episodes ?? drama.total_episodes ?? 0;
     const total = drama.total_episodes ?? 0;

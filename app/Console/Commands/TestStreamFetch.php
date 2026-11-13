@@ -51,7 +51,7 @@ class TestStreamFetch extends Command
             return 1;
         }
 
-        $apiUrl = "https://dramadunyam.com/play/{$drama->external_id}/{$episode}";
+        $apiUrl = config('services.dramadunyam.url')."/play/{$drama->external_id}/{$episode}";
         $this->info("API URL: {$apiUrl}");
         $this->newLine();
 
@@ -73,7 +73,7 @@ class TestStreamFetch extends Command
                 ->withHeaders([
                     'Cookie' => $cookie,
                     'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Referer' => 'https://dramadunyam.com/',
+                    'Referer' => config('services.dramadunyam.url').'/',
                     'Accept' => 'application/json',
                 ])
                 ->get($apiUrl);

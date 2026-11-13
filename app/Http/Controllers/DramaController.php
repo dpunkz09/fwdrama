@@ -13,7 +13,15 @@ use Inertia\Inertia;
 
 class DramaController extends Controller
 {
-    private const BASE_URL = 'https://dramadunyam.com/api';
+    private function getBaseUrl(): string
+    {
+        return config('services.dramadunyam.api_base_url');
+    }
+
+    private function getDramaUrl(): string
+    {
+        return config('services.dramadunyam.url');
+    }
 
     private const DETAIL_CACHE_TTL_MINUTES = 1440; // 24 hours for detail pages
 
@@ -333,7 +341,7 @@ class DramaController extends Controller
             return response()->json(['error' => 'Streaming service not configured'], 500);
         }
 
-        $apiUrl = "https://dramadunyam.com/play/{$drama->external_id}/{$episode}";
+        $apiUrl = $this->getDramaUrl()."/play/{$drama->external_id}/{$episode}";
 
         try {
             $response = Http::timeout(10)
@@ -524,8 +532,11 @@ class DramaController extends Controller
             return response('Missing URL parameter', 400);
         }
 
-        // Ensure it's a dramadunyam.com URL for security
-        if (! str_starts_with($targetUrl, 'https://dramadunyam.com')) {
+        // Ensure it's a dramadunyam URL for security
+        $allowedHost = parse_url($this->getDramaUrl(), PHP_URL_HOST);
+        $targetHost = parse_url($targetUrl, PHP_URL_HOST);
+
+        if ($targetHost !== $allowedHost) {
             return response('Invalid URL', 403);
         }
 
@@ -550,27 +561,27 @@ class DramaController extends Controller
             $contentType = $response->header('Content-Type');
             $body = $response->body();
 
-            if (str_contains($contentType, 'application/vnd.apple.mpegurl') || 
+            if (str_contains($contentType, 'application/vnd.apple.mpegurl') ||
                 str_contains($contentType, 'application/x-mpegURL') ||
                 str_ends_with($targetUrl, '.m3u8')) {
-                
+
                 // Parse the base URL from the target
                 $baseUrl = dirname($targetUrl);
-                
+
                 // Rewrite relative URLs in the playlist to go through our proxy
                 $body = preg_replace_callback('/^([^#\s].+)$/m', function ($matches) use ($baseUrl) {
                     $url = $matches[1];
-                    
+
                     // Skip if already absolute URL
                     if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
                         $fullUrl = $url;
                     } else {
                         // Make relative URL absolute
-                        $fullUrl = $baseUrl . '/' . $url;
+                        $fullUrl = $baseUrl.'/'.$url;
                     }
-                    
+
                     // Return URL that points to our proxy
-                    return route('drama.proxy-hls') . '?url=' . urlencode($fullUrl);
+                    return route('drama.proxy-hls').'?url='.urlencode($fullUrl);
                 }, $body);
             }
 

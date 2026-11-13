@@ -10,7 +10,15 @@ use Inertia\Inertia;
 
 class DramaImportController extends Controller
 {
-    private const BASE_URL = 'https://dramadunyam.com/api';
+    private function getBaseUrl(): string
+    {
+        return config('services.dramadunyam.api_base_url');
+    }
+
+    private function getDramaUrl(): string
+    {
+        return config('services.dramadunyam.url');
+    }
 
     public function index()
     {
@@ -22,7 +30,7 @@ class DramaImportController extends Controller
         $page = $request->input('page', 1);
         $perPage = $request->input('per_page', 64);
 
-        $response = Http::get(self::BASE_URL.'/yeni-eklenenler', [
+        $response = Http::get($this->getBaseUrl().'/yeni-eklenenler', [
             'sayfa' => $page,
             'adet' => $perPage,
             'home' => 1,
@@ -45,7 +53,7 @@ class DramaImportController extends Controller
 
                     // Convert relative cover URLs to absolute
                     if (! empty($item['cover']) && str_starts_with($item['cover'], '/')) {
-                        $item['cover'] = 'https://dramadunyam.com'.$item['cover'];
+                        $item['cover'] = $this->getDramaUrl().$item['cover'];
                     }
 
                     return $item;
@@ -83,7 +91,7 @@ class DramaImportController extends Controller
         $response = Http::withHeaders([
             'Cookie' => $cookie,
             'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        ])->get(self::BASE_URL."/series/{$slug}", [
+        ])->get($this->getBaseUrl()."/series/{$slug}", [
             'core' => 1,
             'lang' => 'en',
         ]);

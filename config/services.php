@@ -36,6 +36,8 @@ return [
     ],
 
     'dramadunyam' => [
+        'url' => env('DRAMA_API_URL', 'https://dramadunyam.com'),
+        'api_base_url' => env('DRAMA_API_BASE_URL', 'https://dramadunyam.com/api'),
         'cookie' => env('DRAMADUNYAM_COOKIE'),
     ],
 

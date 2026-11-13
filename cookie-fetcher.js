@@ -22,8 +22,8 @@ async function fetchCookies() {
     
     const page = await context.newPage();
     
-    console.log('🌐 Visiting dramadunyam.com...');
-    await page.goto('https://dramadunyam.com/en', {
+    console.log('🌐 Visiting drama API...');
+    await page.goto(process.env.DRAMA_API_URL + '/en' || 'https://dramadunyam.com/en', {
         waitUntil: 'networkidle',
         timeout: 30000
     });

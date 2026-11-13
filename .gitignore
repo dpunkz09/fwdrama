@@ -50,3 +50,8 @@ yarn-error.log
 # Markdown files (except README.md)
 *.md
 !README.md
+
+# Deployment and configuration files
+cookie-fetcher.js
+nginx-drama.flixworld.xyz.conf
+create_database.sql

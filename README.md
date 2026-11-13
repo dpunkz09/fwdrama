@@ -23,30 +23,6 @@ A modern short drama streaming platform built with Laravel, React, Inertia.js, a
 - **Build Tool**: Vite Plus
 - **Database**: SQLite (default)
 
-## API Integration
-
-This application fetches drama data from external APIs:
-
-### Popular Dramas
-```
-GET https://dramadunyam.com/api/akis?seed=1511379802&sayfa=1&adet=64&lang=en
-```
-
-### New Dramas
-```
-GET https://dramadunyam.com/api/yeni-eklenenler?sayfa=1&adet=64&home=1&lang=en
-```
-
-### Rankings
-```
-GET https://dramadunyam.com/api/siralama?home=1&donem={period}&lang=en
-```
-Where `period` can be: `gun` (today), `hafta` (week), or `ay` (month)
-
-### Drama Details
-```
-GET https://dramadunyam.com/api/series/{slug}?core=1&lang=en
-```
 
 ## Getting Started
 
