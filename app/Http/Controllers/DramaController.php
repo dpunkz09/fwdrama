@@ -525,30 +525,25 @@ class DramaController extends Controller
      */
     public function proxyHls(Request $request)
     {
-        // Get the target URL from query parameter
         $targetUrl = $request->query('url');
 
         if (empty($targetUrl)) {
             return response('Missing URL parameter', 400);
         }
 
-        // Ensure it's a dramadunyam URL for security
         $allowedHost = parse_url($this->getDramaUrl(), PHP_URL_HOST);
-        $targetHost = parse_url($targetUrl, PHP_URL_HOST);
-
-        if ($targetHost !== $allowedHost) {
+        if (parse_url($targetUrl, PHP_URL_HOST) !== $allowedHost) {
             return response('Invalid URL', 403);
         }
 
         $cookie = config('services.dramadunyam.cookie');
-
         if (empty($cookie)) {
             return response('Service not configured', 500);
         }
 
         try {
             $response = Http::timeout(30)
-                ->retry(2, 1000) // Retry twice with 1s delay
+                ->retry(2, 1000, throw: false) // don't turn upstream 4xx into exceptions
                 ->withHeaders([
                     'Cookie' => $cookie,
                     'User-Agent' => 'Mozilla/5.0 (Linux; Android 14; SM-A546B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.86 Mobile Safari/537.36',
@@ -557,56 +552,79 @@ class DramaController extends Controller
                 ])
                 ->get($targetUrl);
 
-            // For m3u8 playlists, rewrite URLs to go through our proxy
             $contentType = $response->header('Content-Type');
             $body = $response->body();
 
-            if (str_contains($contentType, 'application/vnd.apple.mpegurl') ||
-                str_contains($contentType, 'application/x-mpegURL') ||
-                str_ends_with($targetUrl, '.m3u8')) {
+            // Detect by path (ignores ?verify=...) or by the playlist header
+            $path = strtolower(parse_url($targetUrl, PHP_URL_PATH) ?? '');
+            $isPlaylist = str_ends_with($path, '.m3u8')
+                || str_starts_with(ltrim(substr($body, 0, 16)), '#EXTM3U');
 
-                // Parse the base URL from the target (remove filename)
-                $parsedUrl = parse_url($targetUrl);
-                $baseUrl = $parsedUrl['scheme'].'://'.$parsedUrl['host'];
-
-                // Get the directory path (everything before the last slash)
-                $path = dirname($parsedUrl['path']);
-                $baseUrl .= $path;
-
-                // Rewrite relative URLs in the playlist to go through our proxy
-                $body = preg_replace_callback('/^([^#\s].+)$/m', function ($matches) use ($baseUrl) {
-                    $url = trim($matches[1]);
-
-                    // Skip if already absolute URL
-                    if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
-                        $fullUrl = $url;
-                    } else {
-                        // Make relative URL absolute
-                        $fullUrl = $baseUrl.'/'.$url;
-                    }
-
-                    // Log for debugging
-                    \Log::debug('HLS URL rewrite', ['original' => $url, 'full' => $fullUrl]);
-
-                    // Return URL that points to our proxy
-                    return '/api/proxy/hls?url='.urlencode($fullUrl);
-                }, $body);
+            if ($isPlaylist) {
+                $body = $this->rewritePlaylist($body, $targetUrl);
+                $contentType = 'application/vnd.apple.mpegurl';
             }
 
-            // Return the response with appropriate headers
             return response($body, $response->status())
                 ->header('Content-Type', $contentType ?: 'application/octet-stream')
                 ->header('Access-Control-Allow-Origin', '*')
                 ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
                 ->header('Access-Control-Allow-Headers', 'Content-Type');
-
         } catch (\Exception $e) {
-            \Log::error('HLS proxy error', [
-                'url' => $targetUrl,
-                'error' => $e->getMessage(),
-            ]);
+            \Log::error('HLS proxy error', ['url' => $targetUrl, 'error' => $e->getMessage()]);
 
             return response('Failed to fetch content', 500);
         }
+    }
+
+    private function rewritePlaylist(string $playlist, string $playlistUrl): string
+    {
+        $proxy = fn (string $uri) => '/api/proxy/hls?url='.urlencode($this->resolveUrl($uri, $playlistUrl));
+
+        $lines = preg_split('/\r\n|\n|\r/', $playlist);
+
+        $lines = array_map(function ($line) use ($proxy) {
+            $trimmed = trim($line);
+
+            if ($trimmed === '') {
+                return $line;
+            }
+
+            // Tags: rewrite URI="..." (EXT-X-KEY, EXT-X-MAP, EXT-X-MEDIA, ...)
+            if (str_starts_with($trimmed, '#')) {
+                return preg_replace_callback(
+                    '/URI="([^"]+)"/',
+                    fn ($m) => 'URI="'.$proxy($m[1]).'"',
+                    $line
+                );
+            }
+
+            // Plain line = segment or variant playlist
+            return $proxy($trimmed);
+        }, $lines);
+
+        return implode("\n", $lines);
+    }
+
+    private function resolveUrl(string $uri, string $baseUrl): string
+    {
+        if (preg_match('#^https?://#i', $uri)) {
+            return $uri;
+        }
+
+        $base = parse_url($baseUrl);
+        $origin = $base['scheme'].'://'.$base['host'].(isset($base['port']) ? ':'.$base['port'] : '');
+
+        if (str_starts_with($uri, '//')) {
+            return $base['scheme'].':'.$uri;
+        }
+
+        if (str_starts_with($uri, '/')) {
+            return $origin.$uri;
+        }
+
+        $dir = rtrim(dirname($base['path'] ?? '/'), '/');
+
+        return $origin.$dir.'/'.$uri;
     }
 }
