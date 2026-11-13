@@ -81,31 +81,39 @@ class Drama extends Model
             $similar = $data['similar'];
         }
 
+        // Prepare data array
+        $dramaData = [
+            'slug' => $data['slug'],
+            'title' => $data['title'],
+            'language' => $data['language'] ?? 'en',
+            'cover' => $localCover ?? $data['cover'] ?? null,
+            'platform' => $data['platform'] ?? null,
+            'total_episodes' => $data['total_episodes'] ?? 0,
+            'available_episodes' => $data['available_episodes'] ?? 0,
+            'is_new' => $data['is_new'] ?? false,
+            'is_popular' => $data['is_popular'] ?? false,
+            'description' => $data['description'] ?? null,
+            'genre' => $data['genre'] ?? null,
+            'views' => $data['views'] ?? 0,
+            'is_featured' => $data['is_featured'] ?? false,
+            'release_date' => $data['release_date'] ?? null,
+            'source_total' => $data['source_total'] ?? 0,
+            'episodes_in_db' => $data['episodes_in_db'] ?? 0,
+            'bolum_no' => $data['bolum_no'] ?? null,
+        ];
+
+        // Handle JSON fields manually to avoid casting issues
+        if (! empty($tags)) {
+            $dramaData['tags'] = json_encode($tags);
+        }
+
+        if (! empty($similar)) {
+            $dramaData['similar'] = json_encode($similar);
+        }
+
         return self::updateOrCreate(
             ['external_id' => $data['id']],
-            [
-                'slug' => $data['slug'],
-                'title' => $data['title'],
-                'language' => $data['language'] ?? 'en',
-                'cover' => $localCover ?? $data['cover'] ?? null,
-                'platform' => $data['platform'] ?? null,
-                'total_episodes' => $data['total_episodes'] ?? 0,
-                'available_episodes' => $data['available_episodes'] ?? 0,
-                'is_new' => $data['is_new'] ?? false,
-                'is_popular' => $data['is_popular'] ?? false,
-                'description' => $data['description'] ?? null,
-                'genre' => $data['genre'] ?? null,
-                'views' => $data['views'] ?? 0,
-                'is_featured' => $data['is_featured'] ?? false,
-                'release_date' => $data['release_date'] ?? null,
-                // Note: view_count is NOT imported - we manage our own view counts starting from 0
-                'source_total' => $data['source_total'] ?? 0,
-                'tags' => ! empty($tags) ? $tags : null,
-                'episodes_in_db' => $data['episodes_in_db'] ?? 0,
-                'bolum_no' => $data['bolum_no'] ?? null,
-                'similar' => ! empty($similar) ? $similar : null,
-                // Note: like_count is NOT imported - we manage our own likes starting from 0
-            ]
+            $dramaData
         );
     }
 
