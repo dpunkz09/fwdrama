@@ -66,8 +66,6 @@ Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.'
     Route::post('/import/fetch-list', [DramaImportController::class, 'fetchList'])->name('import.fetch-list');
     Route::post('/import/single', [DramaImportController::class, 'import'])->name('import.single');
     Route::post('/import/batch', [DramaImportController::class, 'batchImport'])->name('import.batch');
-    Route::get('/import/progress/{batchId}', [DramaImportController::class, 'importProgress'])->name('import.progress');
-    Route::get('/import/history', [DramaImportController::class, 'importHistory'])->name('import.history');
 
     // Platform Management Routes
     Route::get('/platforms', [Admin\PlatformController::class, 'index'])->name('platforms');

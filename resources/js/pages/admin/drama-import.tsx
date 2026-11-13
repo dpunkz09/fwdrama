@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 interface DramaItem {
     id: string;
@@ -17,16 +17,6 @@ interface ApiResponse {
     toplam: number;
 }
 
-interface ImportJob {
-    batch_id: string;
-    status: string;
-    current: number;
-    total: number;
-    message: string;
-    started_at?: string;
-    completed_at?: string;
-}
-
 export default function DramaImport() {
     const [dramas, setDramas] = useState<DramaItem[]>([]);
     const [page, setPage] = useState(1);
@@ -35,85 +25,10 @@ export default function DramaImport() {
     const [selectedDramas, setSelectedDramas] = useState<string[]>([]);
     const [importing, setImporting] = useState(false);
     const [importProgress, setImportProgress] = useState<string>('');
-    const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
     const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; message: string } | null>(null);
     const [progressLogs, setProgressLogs] = useState<string[]>([]);
-    const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
     const [slugInput, setSlugInput] = useState<string>('');
     const [slugImporting, setSlugImporting] = useState(false);
-
-    // Fetch import history on mount
-    useEffect(() => {
-        fetchImportHistory();
-    }, []);
-
-    // Poll for progress if there's an active batch
-    useEffect(() => {
-        if (!currentBatchId) return;
-
-        const pollInterval = setInterval(() => {
-            fetchBatchProgress(currentBatchId);
-        }, 2000); // Poll every 2 seconds
-
-        return () => clearInterval(pollInterval);
-    }, [currentBatchId]);
-
-    const fetchImportHistory = async () => {
-        try {
-            const response = await fetch('/admin/import/history');
-            const data = await response.json();
-            setImportJobs(data.jobs || []);
-
-            // Check if there's a running job
-            const runningJob = data.jobs.find((job: ImportJob) => job.status === 'running');
-            if (runningJob) {
-                setCurrentBatchId(runningJob.batch_id);
-                setImporting(true);
-            }
-        } catch (error) {
-            console.error('Failed to fetch import history:', error);
-        }
-    };
-
-    const fetchBatchProgress = async (batchId: string) => {
-        try {
-            const response = await fetch(`/admin/import/progress/${batchId}`);
-            const data = await response.json();
-
-            if (data.found) {
-                setBatchProgress({
-                    current: data.current || 0,
-                    total: data.total || 0,
-                    message: data.message || '',
-                });
-
-                // Add to logs if message changed
-                if (data.message && !progressLogs.includes(data.message)) {
-                    setProgressLogs((prev) => [...prev, data.message]);
-                }
-
-                // Update drama list for successful imports
-                if (data.current_slug && data.current_status === 'success') {
-                    setDramas((prev) =>
-                        prev.map((d) =>
-                            d.slug === data.current_slug ? { ...d, in_database: true } : d
-                        )
-                    );
-                }
-
-                // Check if completed
-                if (data.status === 'completed' || data.status === 'failed') {
-                    setImporting(false);
-                    setCurrentBatchId(null);
-                    setImportProgress(`✅ ${data.message}`);
-                    setSelectedDramas([]);
-                    fetchImportHistory(); // Refresh history
-                }
-            }
-        } catch (error) {
-            console.error('Failed to fetch batch progress:', error);
-        }
-    };
 
     const fetchDramas = async () => {
         setLoading(true);
@@ -220,24 +135,67 @@ export default function DramaImport() {
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': csrfToken,
+                    'Accept': 'text/event-stream',
                 },
                 body: JSON.stringify({ slugs: selectedDramas }),
             });
 
-            const data = await response.json();
+            if (!response.body) {
+                throw new Error('No response body');
+            }
 
-            if (data.success) {
-                setCurrentBatchId(data.batch_id);
-                setImportProgress(`✅ Import job started! Batch ID: ${data.batch_id}`);
-                setProgressLogs([`Starting import of ${data.total} dramas...`, `Job running in background. You can leave this page and come back later.`]);
-                fetchImportHistory(); // Refresh history
-            } else {
-                setImportProgress(`❌ Failed to start import`);
-                setImporting(false);
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            // Read the stream
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        if (data.type === 'start') {
+                            setBatchProgress({ current: 0, total: data.total, message: data.message });
+                            setProgressLogs([data.message]);
+                        } else if (data.type === 'progress') {
+                            setBatchProgress({ 
+                                current: data.current, 
+                                total: data.total, 
+                                message: data.message 
+                            });
+                            
+                            setProgressLogs((prev) => [...prev, data.message]);
+                            
+                            // Update drama in list if successful or skipped
+                            if (data.status === 'success' || data.status === 'skipped') {
+                                setDramas((prev) =>
+                                    prev.map((d) => 
+                                        d.slug === data.slug ? { ...d, in_database: true } : d
+                                    )
+                                );
+                            }
+                        } else if (data.type === 'complete') {
+                            setBatchProgress(null);
+                            setImportProgress(`✅ ${data.message}`);
+                            setProgressLogs((prev) => [...prev, `\n✅ ${data.message}`]);
+                            setSelectedDramas([]);
+                        }
+                    }
+                }
             }
         } catch (error) {
             console.error('Batch import error:', error);
-            setImportProgress(`❌ Failed to start import: ${error}`);
+            setImportProgress(`❌ Failed to import batch: ${error}`);
+            setBatchProgress(null);
+        } finally {
             setImporting(false);
         }
     };
@@ -297,62 +255,9 @@ export default function DramaImport() {
                         Import Dramas
                     </h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        Import dramas from DramaDunyam API (background jobs)
+                        Import dramas from DramaDunyam API
                     </p>
                 </div>
-
-                {/* Import History */}
-                {importJobs.length > 0 && (
-                    <div className="bg-card p-6 rounded-lg border mb-6">
-                        <h2 className="text-lg font-semibold mb-4">Recent Import Jobs</h2>
-                        <div className="space-y-2">
-                            {importJobs.map((job) => (
-                                <div
-                                    key={job.batch_id}
-                                    className="flex items-center justify-between p-3 bg-muted/50 rounded"
-                                >
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-3">
-                                            <span
-                                                className={`px-2 py-1 text-xs font-medium rounded ${
-                                                    job.status === 'completed'
-                                                        ? 'bg-green-100 text-green-700'
-                                                        : job.status === 'running'
-                                                        ? 'bg-blue-100 text-blue-700'
-                                                        : 'bg-red-100 text-red-700'
-                                                }`}
-                                            >
-                                                {job.status}
-                                            </span>
-                                            <span className="text-sm font-medium">
-                                                {job.current} / {job.total} dramas
-                                            </span>
-                                            <span className="text-xs text-muted-foreground">
-                                                {job.started_at
-                                                    ? new Date(job.started_at).toLocaleString()
-                                                    : 'N/A'}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground mt-1">{job.message}</p>
-                                    </div>
-                                    {job.status === 'running' && (
-                                        <button
-                                            onClick={() => {
-                                                setCurrentBatchId(job.batch_id);
-                                                setImporting(true);
-                                                fetchBatchProgress(job.batch_id);
-                                            }}
-                                            className="ml-4 px-3 py-1 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90"
-                                        >
-                                            Watch Progress
-                                        </button>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
                 {/* Import by Slug */}
                 <div className="bg-card p-6 rounded-lg border mb-6">
                     <h2 className="text-lg font-semibold mb-4">Quick Import by Slug</h2>
