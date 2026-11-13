@@ -277,14 +277,12 @@ export default function DramaWatch({
 
         // Ensure URL is absolute
         let videoUrl = streamData.url;
-        if (videoUrl.startsWith('/')) {
-            // Use Laravel route to get the full URL from config
-            videoUrl = `/api/proxy/hls?url=${encodeURIComponent(videoUrl)}`;
-        }
-
-        // For relay delivery, use our proxy to add cookies
-        if (streamData.delivery === 'relay') {
-            videoUrl = `/api/proxy/hls?url=${encodeURIComponent(videoUrl)}`;
+        
+        // For relay delivery or relative URLs, use our proxy to add cookies and resolve URL
+        if (streamData.delivery === 'relay' || videoUrl.startsWith('/')) {
+            // Only encode the original URL once
+            const urlToProxy = videoUrl.startsWith('/') ? videoUrl : streamData.url;
+            videoUrl = `/api/proxy/hls?url=${encodeURIComponent(urlToProxy)}`;
         }
 
         // Store event handlers for cleanup
