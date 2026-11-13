@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ImportDramaBatch;
 use App\Models\Drama;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -129,153 +130,85 @@ class DramaImportController extends Controller
             'slugs.*' => 'required|string',
         ]);
 
-        // Return streaming response for real-time progress
-        return response()->stream(function () use ($request) {
-            // Increase execution time for batch imports
-            set_time_limit(300); // 5 minutes
+        $slugs = $request->input('slugs');
 
-            $slugs = $request->input('slugs');
-            $total = count($slugs);
-            $processed = 0;
-            $results = [
-                'success' => [],
-                'failed' => [],
-                'skipped' => [],
-            ];
+        // Generate unique batch ID
+        $batchId = 'batch_'.time().'_'.uniqid();
 
-            // Send initial progress
-            $this->sendProgress([
-                'type' => 'start',
-                'total' => $total,
-                'message' => "Starting import of {$total} dramas...",
-            ]);
+        // Dispatch job to queue
+        ImportDramaBatch::dispatch($batchId, $slugs);
 
-            // Check which dramas already exist
-            $existingSlugs = Drama::whereIn('slug', $slugs)
-                ->pluck('title', 'slug')
-                ->toArray();
-
-            $cookie = config('services.dramadunyam.cookie');
-
-            foreach ($slugs as $index => $slug) {
-                $processed++;
-
-                try {
-                    // Skip if already in database
-                    if (isset($existingSlugs[$slug])) {
-                        $results['skipped'][] = [
-                            'slug' => $slug,
-                            'title' => $existingSlugs[$slug],
-                            'reason' => 'Already in database',
-                        ];
-
-                        $this->sendProgress([
-                            'type' => 'progress',
-                            'current' => $processed,
-                            'total' => $total,
-                            'slug' => $slug,
-                            'status' => 'skipped',
-                            'message' => "Skipped: {$existingSlugs[$slug]} (already in database)",
-                        ]);
-
-                        continue;
-                    }
-
-                    // Send fetching status
-                    $this->sendProgress([
-                        'type' => 'progress',
-                        'current' => $processed,
-                        'total' => $total,
-                        'slug' => $slug,
-                        'status' => 'fetching',
-                        'message' => "Fetching data for {$slug}...",
-                    ]);
-
-                    $response = Http::timeout(15)
-                        ->withHeaders([
-                            'Cookie' => $cookie,
-                            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        ])->get($this->getBaseUrl()."/series/{$slug}", [
-                            'core' => 1,
-                            'lang' => 'en',
-                        ]);
-
-                    if ($response->successful()) {
-                        $apiData = $response->json();
-                        $drama = Drama::createOrUpdateFromApi($apiData);
-
-                        $results['success'][] = [
-                            'slug' => $slug,
-                            'title' => $drama->title,
-                        ];
-
-                        $this->sendProgress([
-                            'type' => 'progress',
-                            'current' => $processed,
-                            'total' => $total,
-                            'slug' => $slug,
-                            'status' => 'success',
-                            'message' => "✓ Imported: {$drama->title}",
-                            'title' => $drama->title,
-                        ]);
-                    } else {
-                        $results['failed'][] = [
-                            'slug' => $slug,
-                            'reason' => 'API request failed',
-                        ];
-
-                        $this->sendProgress([
-                            'type' => 'progress',
-                            'current' => $processed,
-                            'total' => $total,
-                            'slug' => $slug,
-                            'status' => 'failed',
-                            'message' => "✗ Failed: {$slug} (API request failed)",
-                        ]);
-                    }
-
-                    // Small delay to avoid overwhelming the API
-                    usleep(200000); // 200ms delay
-                } catch (\Exception $e) {
-                    $results['failed'][] = [
-                        'slug' => $slug,
-                        'reason' => $e->getMessage(),
-                    ];
-
-                    $this->sendProgress([
-                        'type' => 'progress',
-                        'current' => $processed,
-                        'total' => $total,
-                        'slug' => $slug,
-                        'status' => 'failed',
-                        'message' => "✗ Failed: {$slug} ({$e->getMessage()})",
-                    ]);
-                }
-            }
-
-            // Send final summary
-            $message = count($results['success']).' dramas imported successfully';
-            if (count($results['skipped']) > 0) {
-                $message .= ', '.count($results['skipped']).' skipped';
-            }
-            if (count($results['failed']) > 0) {
-                $message .= ', '.count($results['failed']).' failed';
-            }
-
-            $this->sendProgress([
-                'type' => 'complete',
-                'message' => $message,
-                'results' => $results,
-            ]);
-        }, 200, [
-            'Cache-Control' => 'no-cache',
-            'Content-Type' => 'text/event-stream',
-            'X-Accel-Buffering' => 'no', // Disable nginx buffering
+        return response()->json([
+            'success' => true,
+            'batch_id' => $batchId,
+            'message' => 'Import job started in background',
+            'total' => count($slugs),
         ]);
     }
 
     /**
-     * Send Server-Sent Events progress update
+     * Get import progress status
+     */
+    public function importProgress(Request $request, string $batchId)
+    {
+        $progress = Cache::get("drama_import:{$batchId}");
+
+        if (! $progress) {
+            return response()->json([
+                'found' => false,
+                'message' => 'Import job not found or expired',
+            ], 404);
+        }
+
+        return response()->json([
+            'found' => true,
+            'batch_id' => $batchId,
+            ...$progress,
+        ]);
+    }
+
+    /**
+     * Get list of recent import jobs
+     */
+    public function importHistory()
+    {
+        // Get all import batch keys from cache
+        $pattern = 'drama_import:batch_*';
+
+        // For Laravel cache with Redis
+        $keys = Cache::getStore()->getRedis()->keys(config('cache.prefix').':'.$pattern);
+
+        $jobs = [];
+        foreach ($keys as $key) {
+            // Remove the prefix
+            $batchId = str_replace(config('cache.prefix').':drama_import:', '', $key);
+            $progress = Cache::get("drama_import:{$batchId}");
+
+            if ($progress) {
+                $jobs[] = [
+                    'batch_id' => $batchId,
+                    'status' => $progress['status'] ?? 'unknown',
+                    'current' => $progress['current'] ?? 0,
+                    'total' => $progress['total'] ?? 0,
+                    'message' => $progress['message'] ?? '',
+                    'started_at' => $progress['started_at'] ?? null,
+                    'completed_at' => $progress['completed_at'] ?? null,
+                ];
+            }
+        }
+
+        // Sort by newest first
+        usort($jobs, function ($a, $b) {
+            return ($b['started_at'] ?? '') <=> ($a['started_at'] ?? '');
+        });
+
+        return response()->json([
+            'jobs' => array_slice($jobs, 0, 10), // Return last 10 jobs
+        ]);
+    }
+
+    /**
+     * Send Server-Sent Events progress update (kept for backward compatibility)
      */
     private function sendProgress(array $data): void
     {
