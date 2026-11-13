@@ -129,78 +129,158 @@ class DramaImportController extends Controller
             'slugs.*' => 'required|string',
         ]);
 
-        // Increase execution time for batch imports
-        set_time_limit(300); // 5 minutes
+        // Return streaming response for real-time progress
+        return response()->stream(function () use ($request) {
+            // Increase execution time for batch imports
+            set_time_limit(300); // 5 minutes
 
-        $slugs = $request->input('slugs');
-        $results = [
-            'success' => [],
-            'failed' => [],
-            'skipped' => [],
-        ];
+            $slugs = $request->input('slugs');
+            $total = count($slugs);
+            $processed = 0;
+            $results = [
+                'success' => [],
+                'failed' => [],
+                'skipped' => [],
+            ];
 
-        // Check which dramas already exist
-        $existingSlugs = Drama::whereIn('slug', $slugs)
-            ->pluck('title', 'slug')
-            ->toArray();
+            // Send initial progress
+            $this->sendProgress([
+                'type' => 'start',
+                'total' => $total,
+                'message' => "Starting import of {$total} dramas...",
+            ]);
 
-        $cookie = config('services.dramadunyam.cookie');
+            // Check which dramas already exist
+            $existingSlugs = Drama::whereIn('slug', $slugs)
+                ->pluck('title', 'slug')
+                ->toArray();
 
-        foreach ($slugs as $slug) {
-            try {
-                // Skip if already in database
-                if (isset($existingSlugs[$slug])) {
-                    $results['skipped'][] = [
+            $cookie = config('services.dramadunyam.cookie');
+
+            foreach ($slugs as $index => $slug) {
+                $processed++;
+
+                try {
+                    // Skip if already in database
+                    if (isset($existingSlugs[$slug])) {
+                        $results['skipped'][] = [
+                            'slug' => $slug,
+                            'title' => $existingSlugs[$slug],
+                            'reason' => 'Already in database',
+                        ];
+
+                        $this->sendProgress([
+                            'type' => 'progress',
+                            'current' => $processed,
+                            'total' => $total,
+                            'slug' => $slug,
+                            'status' => 'skipped',
+                            'message' => "Skipped: {$existingSlugs[$slug]} (already in database)",
+                        ]);
+
+                        continue;
+                    }
+
+                    // Send fetching status
+                    $this->sendProgress([
+                        'type' => 'progress',
+                        'current' => $processed,
+                        'total' => $total,
                         'slug' => $slug,
-                        'title' => $existingSlugs[$slug],
-                        'reason' => 'Already in database',
-                    ];
-
-                    continue;
-                }
-
-                $response = Http::timeout(15) // Reduced timeout per request
-                    ->withHeaders([
-                        'Cookie' => $cookie,
-                        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    ])->get($this->getBaseUrl()."/series/{$slug}", [
-                        'core' => 1,
-                        'lang' => 'en',
+                        'status' => 'fetching',
+                        'message' => "Fetching data for {$slug}...",
                     ]);
 
-                if ($response->successful()) {
-                    $apiData = $response->json();
-                    $drama = Drama::createOrUpdateFromApi($apiData);
-                    $results['success'][] = [
-                        'slug' => $slug,
-                        'title' => $drama->title,
-                    ];
-                } else {
+                    $response = Http::timeout(15)
+                        ->withHeaders([
+                            'Cookie' => $cookie,
+                            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        ])->get($this->getBaseUrl()."/series/{$slug}", [
+                            'core' => 1,
+                            'lang' => 'en',
+                        ]);
+
+                    if ($response->successful()) {
+                        $apiData = $response->json();
+                        $drama = Drama::createOrUpdateFromApi($apiData);
+
+                        $results['success'][] = [
+                            'slug' => $slug,
+                            'title' => $drama->title,
+                        ];
+
+                        $this->sendProgress([
+                            'type' => 'progress',
+                            'current' => $processed,
+                            'total' => $total,
+                            'slug' => $slug,
+                            'status' => 'success',
+                            'message' => "✓ Imported: {$drama->title}",
+                            'title' => $drama->title,
+                        ]);
+                    } else {
+                        $results['failed'][] = [
+                            'slug' => $slug,
+                            'reason' => 'API request failed',
+                        ];
+
+                        $this->sendProgress([
+                            'type' => 'progress',
+                            'current' => $processed,
+                            'total' => $total,
+                            'slug' => $slug,
+                            'status' => 'failed',
+                            'message' => "✗ Failed: {$slug} (API request failed)",
+                        ]);
+                    }
+
+                    // Small delay to avoid overwhelming the API
+                    usleep(200000); // 200ms delay
+                } catch (\Exception $e) {
                     $results['failed'][] = [
                         'slug' => $slug,
-                        'reason' => 'API request failed',
+                        'reason' => $e->getMessage(),
                     ];
+
+                    $this->sendProgress([
+                        'type' => 'progress',
+                        'current' => $processed,
+                        'total' => $total,
+                        'slug' => $slug,
+                        'status' => 'failed',
+                        'message' => "✗ Failed: {$slug} ({$e->getMessage()})",
+                    ]);
                 }
-
-                // Small delay to avoid overwhelming the API
-                usleep(200000); // 200ms delay
-            } catch (\Exception $e) {
-                $results['failed'][] = [
-                    'slug' => $slug,
-                    'reason' => $e->getMessage(),
-                ];
             }
-        }
 
-        $message = count($results['success']).' dramas imported successfully';
-        if (count($results['skipped']) > 0) {
-            $message .= ', '.count($results['skipped']).' skipped (already in database)';
-        }
+            // Send final summary
+            $message = count($results['success']).' dramas imported successfully';
+            if (count($results['skipped']) > 0) {
+                $message .= ', '.count($results['skipped']).' skipped';
+            }
+            if (count($results['failed']) > 0) {
+                $message .= ', '.count($results['failed']).' failed';
+            }
 
-        return response()->json([
-            'success' => true,
-            'message' => $message,
-            'results' => $results,
+            $this->sendProgress([
+                'type' => 'complete',
+                'message' => $message,
+                'results' => $results,
+            ]);
+        }, 200, [
+            'Cache-Control' => 'no-cache',
+            'Content-Type' => 'text/event-stream',
+            'X-Accel-Buffering' => 'no', // Disable nginx buffering
         ]);
+    }
+
+    /**
+     * Send Server-Sent Events progress update
+     */
+    private function sendProgress(array $data): void
+    {
+        echo 'data: '.json_encode($data)."\n\n";
+        ob_flush();
+        flush();
     }
 }

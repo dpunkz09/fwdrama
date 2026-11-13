@@ -25,6 +25,8 @@ export default function DramaImport() {
     const [selectedDramas, setSelectedDramas] = useState<string[]>([]);
     const [importing, setImporting] = useState(false);
     const [importProgress, setImportProgress] = useState<string>('');
+    const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; message: string } | null>(null);
+    const [progressLogs, setProgressLogs] = useState<string[]>([]);
     const [slugInput, setSlugInput] = useState<string>('');
     const [slugImporting, setSlugImporting] = useState(false);
 
@@ -121,48 +123,78 @@ export default function DramaImport() {
         }
 
         setImporting(true);
-        setImportProgress(`Importing ${selectedDramas.length} dramas... This may take a few minutes.`);
+        setBatchProgress({ current: 0, total: selectedDramas.length, message: 'Starting import...' });
+        setProgressLogs([]);
+        setImportProgress('');
 
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            
             const response = await fetch('/admin/import/batch', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+                    'X-CSRF-TOKEN': csrfToken,
+                    'Accept': 'text/event-stream',
                 },
                 body: JSON.stringify({ slugs: selectedDramas }),
             });
 
-            const data = await response.json();
+            if (!response.body) {
+                throw new Error('No response body');
+            }
 
-            if (data.success) {
-                let progressMessage = `✅ ${data.message}`;
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            // Read the stream
+            while (true) {
+                const { done, value } = await reader.read();
                 
-                if (data.results.skipped && data.results.skipped.length > 0) {
-                    progressMessage += `\nℹ️ ${data.results.skipped.length} drama(s) skipped (already in database)`;
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        if (data.type === 'start') {
+                            setBatchProgress({ current: 0, total: data.total, message: data.message });
+                            setProgressLogs([data.message]);
+                        } else if (data.type === 'progress') {
+                            setBatchProgress({ 
+                                current: data.current, 
+                                total: data.total, 
+                                message: data.message 
+                            });
+                            
+                            setProgressLogs((prev) => [...prev, data.message]);
+                            
+                            // Update drama in list if successful or skipped
+                            if (data.status === 'success' || data.status === 'skipped') {
+                                setDramas((prev) =>
+                                    prev.map((d) => 
+                                        d.slug === data.slug ? { ...d, in_database: true } : d
+                                    )
+                                );
+                            }
+                        } else if (data.type === 'complete') {
+                            setBatchProgress(null);
+                            setImportProgress(`✅ ${data.message}`);
+                            setProgressLogs((prev) => [...prev, `\n✅ ${data.message}`]);
+                            setSelectedDramas([]);
+                        }
+                    }
                 }
-                
-                if (data.results.failed && data.results.failed.length > 0) {
-                    progressMessage += `\n⚠️ ${data.results.failed.length} drama(s) failed to import`;
-                }
-                
-                setImportProgress(progressMessage);
-                
-                // Update all imported and skipped dramas in the list
-                const processedSlugs = [
-                    ...data.results.success.map((r: any) => r.slug),
-                    ...data.results.skipped.map((r: any) => r.slug),
-                ];
-                
-                setDramas((prev) =>
-                    prev.map((d) =>
-                        processedSlugs.includes(d.slug) ? { ...d, in_database: true } : d
-                    )
-                );
-                setSelectedDramas([]);
             }
         } catch (error) {
-            setImportProgress(`❌ Failed to import batch`);
+            console.error('Batch import error:', error);
+            setImportProgress(`❌ Failed to import batch: ${error}`);
+            setBatchProgress(null);
         } finally {
             setImporting(false);
         }
@@ -292,6 +324,51 @@ export default function DramaImport() {
 
                     {importProgress && (
                         <div className="mt-4 p-3 bg-muted rounded text-sm whitespace-pre-line">{importProgress}</div>
+                    )}
+
+                    {/* Live Progress Display */}
+                    {batchProgress && (
+                        <div className="mt-4 space-y-3">
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="font-medium">
+                                    Importing: {batchProgress.current} / {batchProgress.total}
+                                </span>
+                                <span className="text-muted-foreground">
+                                    {Math.round((batchProgress.current / batchProgress.total) * 100)}%
+                                </span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                                <div
+                                    className="bg-primary h-2.5 rounded-full transition-all duration-300"
+                                    style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                                ></div>
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                                {batchProgress.message}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Progress Logs */}
+                    {progressLogs.length > 0 && (
+                        <div className="mt-4">
+                            <div className="flex items-center justify-between mb-2">
+                                <h3 className="text-sm font-semibold">Import Log</h3>
+                                <button
+                                    onClick={() => setProgressLogs([])}
+                                    className="text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                            <div className="bg-black/90 text-green-400 p-4 rounded font-mono text-xs max-h-64 overflow-y-auto">
+                                {progressLogs.map((log, index) => (
+                                    <div key={index} className="mb-1">
+                                        {log}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     )}
                 </div>
 
