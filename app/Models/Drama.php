@@ -75,6 +75,12 @@ class Drama extends Model
             })->filter()->values()->toArray();
         }
 
+        // Normalize similar dramas
+        $similar = [];
+        if (isset($data['similar']) && is_array($data['similar'])) {
+            $similar = $data['similar'];
+        }
+
         return self::updateOrCreate(
             ['external_id' => $data['id']],
             [
@@ -94,10 +100,10 @@ class Drama extends Model
                 'release_date' => $data['release_date'] ?? null,
                 // Note: view_count is NOT imported - we manage our own view counts starting from 0
                 'source_total' => $data['source_total'] ?? 0,
-                'tags' => $tags,
+                'tags' => ! empty($tags) ? $tags : null,
                 'episodes_in_db' => $data['episodes_in_db'] ?? 0,
                 'bolum_no' => $data['bolum_no'] ?? null,
-                'similar' => $data['similar'] ?? [],
+                'similar' => ! empty($similar) ? $similar : null,
                 // Note: like_count is NOT imported - we manage our own likes starting from 0
             ]
         );
